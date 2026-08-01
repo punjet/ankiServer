@@ -7,11 +7,11 @@ import (
 	"strconv"
 	"sync"
 
+	aiClient "github.com/punjet/ankiserver/internal/ai"
 	"github.com/punjet/ankiserver/internal/deepl"
 )
 
 // DeepLKeyStore is a simple thread-safe in-memory store for the DeepL API key.
-// The key can also be pre-loaded from the DEEPL_KEY environment variable.
 type DeepLKeyStore struct {
 	mu     sync.RWMutex
 	key    string
@@ -47,33 +47,51 @@ func (s *DeepLKeyStore) set(key string) {
 }
 
 // Config handles GET/POST /config.
-// GET  — returns server status, DeepL key presence, monthly char count.
-// POST — allows setting the DeepL key at runtime.
-func Config(store *DeepLKeyStore, logger *slog.Logger) http.HandlerFunc {
+//
+// GET  — returns server status (DeepL key presence, OpenAI key presence, monthly char count).
+// POST — allows setting keys at runtime without restart.
+//
+// setOpenAIKey is a callback provided by main to update the ai.Client store.
+func Config(
+	deepLStore *DeepLKeyStore,
+	getAI func() *aiClient.Client,
+	setOpenAIKey func(key string),
+	logger *slog.Logger,
+) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			var body struct {
-				DeepLKey string `json:"deepl_key"`
+				DeepLKey  string `json:"deepl_key"`
+				OpenAIKey string `json:"openai_key"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
 				return
 			}
+
 			if body.DeepLKey != "" {
-				store.mu.Lock()
-				store.set(body.DeepLKey)
-				store.mu.Unlock()
+				deepLStore.mu.Lock()
+				deepLStore.set(body.DeepLKey)
+				deepLStore.mu.Unlock()
 				logger.Info("🔑 DeepL key updated via API")
 			}
+
+			if body.OpenAIKey != "" {
+				setOpenAIKey(body.OpenAIKey)
+				logger.Info("🤖 OpenAI key updated via API")
+			}
+
 			writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 			return
 		}
 
-		// GET
+		// GET — return current status.
 		month, countStr := CharStats()
 		count, _ := strconv.Atoi(countStr)
+
 		writeJSON(w, http.StatusOK, map[string]any{
-			"has_deepl_key":          store.HasKey(),
+			"has_deepl_key":          deepLStore.HasKey(),
+			"has_openai_key":         getAI() != nil,
 			"deepl_chars_this_month": count,
 			"deepl_chars_month":      month,
 		})

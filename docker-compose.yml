@@ -26,6 +26,11 @@ services:
       DEEPL_KEY: "${DEEPL_KEY:-}"
       BUFFER_FILE: "/data/anki_buffer.json"
       LOG_LEVEL: "${LOG_LEVEL:-info}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      OPENAI_MODEL: "${OPENAI_MODEL:-gpt-4o-mini}"
+      MAX_CARDS_PER_REQUEST: "${MAX_CARDS_PER_REQUEST:-5}"
+      GRAMMAR_DECK_NAME: "${GRAMMAR_DECK_NAME:-GrammarErrors}"
+      GRAMMAR_MODEL_NAME: "${GRAMMAR_MODEL_NAME:-GrammarErrors}"
 
     # Linux only — maps host.docker.internal to the host gateway.
     extra_hosts:

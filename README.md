@@ -36,9 +36,45 @@ docker compose up -d
 | `POST` | `/sync` | Выгрузить буфер в Anki |
 | `POST` | `/translate` | Перевести слово через DeepL |
 | `POST` | `/check` | Проверить, есть ли слово в Anki |
+| `POST` | `/grammar` | 🧠 Анализ грамматики → Anki карточки |
 | `GET` | `/config` | Текущая конфигурация |
-| `POST` | `/config` | Обновить DeepL ключ |
+| `POST` | `/config` | Обновить DeepL / OpenAI ключ |
 | `GET` | `/health` | Health-check (для Docker) |
+
+### POST `/grammar`
+
+Принимает английский текст, находит грамматические ошибки через GPT-4o-mini и автоматически создаёт Anki-карточки.
+
+**Request:**
+```json
+{
+  "text": "I goed to store yesterday and buyed milk",
+  "source_url": "https://example.com"
+}
+```
+
+**Response:**
+```json
+{
+  "errors_found": 2,
+  "text_corrected": "I went to the store yesterday and bought milk",
+  "cards_added": 2,
+  "cards": [
+    {
+      "type": "correction",
+      "error_fragment": "goed",
+      "front": "Complete correctly: \"I ___ to the store yesterday\"",
+      "back": "✅ went\n\n📌 Rule: \"go\" is irregular: go → went\n\n💡 More examples:\n• buy → bought\n• think → thought",
+      "rule_tag": "irregular_verbs",
+      "difficulty": "medium"
+    }
+  ]
+}
+```
+
+Карточки сохраняются в буфер и попадают в Anki при следующем `/sync`.
+
+---
 
 ---
 
