@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"crypto/subtle"
+	"log"
 	"net/http"
 	"strings"
 )
@@ -34,12 +35,14 @@ func Auth(apiKey string) func(http.Handler) http.Handler {
 
 			provided := extractKey(r)
 			if provided == "" {
+				log.Printf("Auth failed: missing API key from IP %s", r.RemoteAddr)
 				writeAuthError(w, "missing API key — provide X-API-Key header or Authorization: Bearer <key>")
 				return
 			}
 
 			// Constant-time comparison to prevent timing side-channel attacks.
 			if subtle.ConstantTimeCompare([]byte(provided), expectedKey) != 1 {
+				log.Printf("Auth failed: invalid API key from IP %s", r.RemoteAddr)
 				writeAuthError(w, "invalid API key")
 				return
 			}
