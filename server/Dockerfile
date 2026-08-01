@@ -5,13 +5,12 @@ FROM golang:1.22-alpine AS builder
 
 WORKDIR /build
 
-# Copy go.mod and go.sum from the server directory
+# Cache dependencies separately from source.
 COPY server/go.mod server/go.sum ./
 RUN go mod download
 
-# Copy the entire server directory
-COPY server/ .
-# Compile the application
+# Copy source and compile a fully-static binary.
+COPY server/. .
 RUN CGO_ENABLED=0 GOOS=linux go build \
     -ldflags="-s -w" \
     -o anki-server \
