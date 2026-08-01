@@ -1,30 +1,49 @@
 # 🃏 Anki Server (Go Edition)
 
-Высокопроизводительный локальный сервер для интеграции Safari с Anki. Написан на Go, поставляется как Docker-образ.
+Высокопроизводительный облачный сервер для интеграции Safari с Anki. Написан на Go, работает в связке с вашим VPS (Coolify) и локальным скриптом `ankiupd.py`.
 
-## 🚀 Быстрый старт
-
-### Через Docker (рекомендуется)
-
-```bash
-# 1. Скопируй конфиг
-cp .env.example .env
-# Вставь свой DeepL ключ в DEEPL_KEY=
-
-# 2. Запусти
-docker compose up -d
-```
-
-Сервер доступен на `http://localhost:5005`.
-
-### Coolify
+## 🚀 Деплой через Coolify
 
 1. В Coolify создай новый сервис: **Source → Git Repository**
-2. Вставь ссылку на репо: `git@github.com:punjet/ankiServer.git`
-3. Build Pack: **Docker Compose**
-4. Добавь переменную окружения `DEEPL_KEY` — и жми Deploy!
+2. Выбери репозиторий: `ankiServer`
+3. **Build Pack**: `Dockerfile`
+4. **Base Directory**: `/`
+5. **Dockerfile Location**: `/server/Dockerfile`
 
-> Образ берётся из `ghcr.io/punjet/ankiserver:latest` — пересобирается автоматически при каждом пуше в `main`.
+### Настройка постоянной памяти (Persistent Storage)
+Чтобы при перезапусках сервера не пропадали логи и несохраненные карточки:
+1. Вкладка **Storages** -> **Add Storage**
+2. **Volume Name**: `anki_data`
+3. **Destination Path**: `/app/data`
+4. **Save**
+
+### Переменные окружения (Environment Variables)
+Добавьте следующие переменные:
+```ini
+# Ключ от сервера (вписывается в userscript.js)
+API_KEY=your-secret-key
+
+# API-ключи для перевода и аудио
+DEEPL_KEY=abc12345:fx
+OPENAI_API_KEY=sk-...
+
+# Сохранение логов и буфера
+LOG_FILE=/app/data/server.log
+BUFFER_FILE=/app/data/anki_buffer.json
+```
+После этого нажимайте **Deploy**!
+
+---
+
+## 💻 Настройка клиента (Mac)
+
+1. **Tampermonkey**: Скопируйте содержимое `userscript.js` в расширение Tampermonkey. В коде укажите ваш `API_KEY`.
+2. **Терминал**: В файле `ankiupd.py` укажите адрес вашего сервера `SERVER_URL` и `API_KEY`.
+3. Для удобства добавьте алиас в `~/.zshrc`:
+   ```bash
+   alias ankiupd="python3 /Users/YOUR_NAME/anki_server/ankiupd.py"
+   ```
+4. Теперь, чтобы забрать карточки с сервера и отправить в Anki, просто введите команду `ankiupd` в терминале.
 
 ---
 
@@ -32,83 +51,27 @@ docker compose up -d
 
 | Метод | Путь | Описание |
 |---|---|---|
-| `POST` | `/add` | Добавить слово в буфер |
-| `POST` | `/sync` | Выгрузить буфер в Anki |
+| `POST` | `/add` | Добавить слово в буфер (генерирует аудио через OpenAI) |
 | `POST` | `/translate` | Перевести слово через DeepL |
-| `POST` | `/check` | Проверить, есть ли слово в Anki |
+| `POST` | `/check` | Проверить, есть ли слово в Anki (через userscript) |
 | `POST` | `/grammar` | 🧠 Анализ грамматики → Anki карточки |
-| `GET` | `/config` | Текущая конфигурация |
-| `POST` | `/config` | Обновить DeepL / OpenAI ключ |
-| `GET` | `/health` | Health-check (для Docker) |
-
-### POST `/grammar`
-
-Принимает английский текст, находит грамматические ошибки через GPT-4o-mini и автоматически создаёт Anki-карточки.
-
-**Request:**
-```json
-{
-  "text": "I goed to store yesterday and buyed milk",
-  "source_url": "https://example.com"
-}
-```
-
-**Response:**
-```json
-{
-  "errors_found": 2,
-  "text_corrected": "I went to the store yesterday and bought milk",
-  "cards_added": 2,
-  "cards": [
-    {
-      "type": "correction",
-      "error_fragment": "goed",
-      "front": "Complete correctly: \"I ___ to the store yesterday\"",
-      "back": "✅ went\n\n📌 Rule: \"go\" is irregular: go → went\n\n💡 More examples:\n• buy → bought\n• think → thought",
-      "rule_tag": "irregular_verbs",
-      "difficulty": "medium"
-    }
-  ]
-}
-```
-
-Карточки сохраняются в буфер и попадают в Anki при следующем `/sync`.
+| `GET`  | `/buffer` | Забрать все карточки (для `ankiupd.py`) |
+| `DELETE`| `/buffer` | Удалить загруженные карточки из буфера |
+| `GET`  | `/health` | Health-check (для Docker/Coolify) |
 
 ---
 
----
+## ⚙️ Основные переменные окружения
 
-## ⚙️ Переменные окружения
-
-| Переменная | По умолчанию | Описание |
-|---|---|---|
-| `PORT` | `5005` | Порт HTTP сервера |
-| `ANKI_URL` | `http://host.docker.internal:8765` | URL AnkiConnect |
-| `DEEPL_KEY` | — | API ключ DeepL (обязательный) |
-| `BUFFER_FILE` | `/data/anki_buffer.json` | Путь к файлу буфера |
-| `LOG_LEVEL` | `info` | Уровень логов |
-
----
-
-## 🏗️ Структура проекта
-
-```
-ankiServer/
-├── server/                     # Go сервер
-│   ├── cmd/main.go             # Точка входа, роутинг
-│   ├── internal/
-│   │   ├── anki/client.go      # AnkiConnect клиент
-│   │   ├── buffer/buffer.go    # Thread-safe JSON буфер
-│   │   ├── config/config.go    # Конфигурация из env
-│   │   ├── deepl/client.go     # DeepL API клиент
-│   │   ├── handlers/           # HTTP хендлеры
-│   │   └── middleware/cors.go  # CORS
-│   └── Dockerfile              # Multi-stage build
-├── userscript.js               # Tampermonkey скрипт для Safari
-├── docker-compose.yml          # Готов для Coolify
-├── .env.example                # Шаблон конфигурации
-└── .github/workflows/          # CI/CD → GHCR
-```
+| Переменная | Описание |
+|---|---|
+| `PORT` | Порт HTTP сервера (по умолчанию `5005`) |
+| `API_KEY` | Секретный ключ для защиты вашего сервера |
+| `DEEPL_KEY` | API ключ DeepL (обязательный для `/translate`) |
+| `OPENAI_API_KEY` | Ключ OpenAI (для озвучки и проверки грамматики) |
+| `OPENAI_MODEL` | Модель для грамматики (по умолчанию `gpt-4o-mini`) |
+| `BUFFER_FILE` | Путь к файлу буфера (`/app/data/anki_buffer.json`) |
+| `LOG_FILE` | Путь к файлу логов (`/app/data/server.log`) |
 
 ---
 
@@ -117,7 +80,7 @@ ankiServer/
 Модель `WordsFromSafari` должна содержать поля:
 `Word`, `WordTranslation`, `Context`, `ContextTranslation`, `Audio`, `Spelling`, `SpellingTranscript`, `SourceURL`, `DateAdded`, `SeenCount`
 
-Сервер проверяет наличие полей при старте и добавляет недостающие автоматически.
+Скрипт загрузки автоматически добавляет карточки в колоду и прикрепляет к ним сгенерированный звук (`[sound:tts_word.mp3]`). Если слово уже существует, скрипт обновит счетчик `SeenCount` (+1).
 
 ---
 
@@ -130,9 +93,8 @@ go run ./cmd
 ```
 
 ```bash
-# Собрать Docker образ локально
-docker build -t anki-server ./server
-docker run -p 5005:5005 -e DEEPL_KEY=your-key anki-server
+# Запуск тестов
+go test ./...
 ```
 
 ---
