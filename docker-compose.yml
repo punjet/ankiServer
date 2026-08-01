@@ -1,0 +1,43 @@
+services:
+  anki-server:
+    # ── Option A: build from source ──────────────────────────────────────────
+    # build:
+    #   context: ./server
+    #   dockerfile: Dockerfile
+
+    # ── Option B: pull pre-built image from GHCR (used by Coolify) ───────────
+    image: ghcr.io/punjet/ankiserver:latest
+
+    container_name: anki-server
+    restart: unless-stopped
+
+    ports:
+      - "5005:5005"
+
+    volumes:
+      # Buffer & config data persisted on the host.
+      - anki_data:/data
+
+    environment:
+      PORT: "${PORT:-5005}"
+      # On macOS Docker Desktop, host.docker.internal resolves to the Mac.
+      # On Linux, add extra_hosts below.
+      ANKI_URL: "${ANKI_URL:-http://host.docker.internal:8765}"
+      DEEPL_KEY: "${DEEPL_KEY:-}"
+      BUFFER_FILE: "/data/anki_buffer.json"
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+
+    # Linux only — maps host.docker.internal to the host gateway.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:5005/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  anki_data:
+    driver: local

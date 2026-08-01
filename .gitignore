@@ -1,0 +1,31 @@
+# macOS
+.DS_Store
+
+# Secrets
+.deepl_key
+.deepl_chars
+
+# Environment variables — never commit!
+.env
+
+# Go build artifacts
+server/anki-server
+
+# Python artifacts (legacy)
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+venv/
+.venv/
+
+# Logs
+*.log
+
+# Editor
+.idea/
+.vscode/
+*.swp
+
+# Anki data (managed by Docker volume)
+anki_buffer.json
