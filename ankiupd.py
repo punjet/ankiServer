@@ -41,6 +41,46 @@ def request_json(url, method="GET", data=None, headers=None):
         print(f"Request failed ({url}): {e}")
         return None
 
+def get_card_seen_count(word):
+    """Ищет карточку в локальном Anki и возвращает (note_id, seen_count)."""
+    res = request_json(LOCAL_ANKI, method="POST", data={
+        "action": "findNotes",
+        "version": 6,
+        "params": {"query": f'Word:"{word}" deck:"WordsFromSafari"'}
+    })
+    if not res or not res.get("result"):
+        return None, None
+
+    note_id = res["result"][0]
+    info_res = request_json(LOCAL_ANKI, method="POST", data={
+        "action": "notesInfo",
+        "version": 6,
+        "params": {"notes": [note_id]}
+    })
+    if not info_res or not info_res.get("result"):
+        return note_id, 1
+
+    fields = info_res["result"][0]["fields"]
+    seen_val = fields.get("SeenCount", {}).get("value", "1")
+    try:
+        seen = int(seen_val)
+    except (ValueError, TypeError):
+        seen = 1
+    return note_id, seen
+
+def increment_seen_count(note_id, current_count):
+    """Обновляет поле SeenCount для карточки."""
+    request_json(LOCAL_ANKI, method="POST", data={
+        "action": "updateNoteFields",
+        "version": 6,
+        "params": {
+            "note": {
+                "id": note_id,
+                "fields": {"SeenCount": str(current_count + 1)}
+            }
+        }
+    })
+
 def main():
     if SERVER_URL == "https://your-anki-server.com":
         print("Пожалуйста, откройте этот скрипт и настройте SERVER_URL и API_KEY.")
@@ -108,7 +148,12 @@ def main():
             print("ОК")
             successful_ids.append(buf_id)
         elif "duplicate" in str(error).lower():
-            print("ДУБЛИКАТ (уже есть в колоде)")
+            note_id, seen = get_card_seen_count(word)
+            if note_id:
+                increment_seen_count(note_id, seen)
+                print(f"ДУБЛИКАТ (обновлен SeenCount: {seen} -> {seen + 1})")
+            else:
+                print("ДУБЛИКАТ (уже есть в колоде)")
             successful_ids.append(buf_id) # Считаем успешным, чтобы убрать из буфера
         else:
             print(f"ОШИБКА ({error})")
