@@ -3,8 +3,8 @@ services:
     # ── Coolify builds the image directly from the Dockerfile ────────────────
     # No registry authentication required — Coolify clones the repo and builds.
     build:
-      context: ./server
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: server/Dockerfile
 
     # ── Alternative: pull a pre-built image from GHCR ────────────────────────
     # Uncomment the line below and comment out the `build:` block above
