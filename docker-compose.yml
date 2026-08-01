@@ -1,47 +1,59 @@
 services:
   anki-server:
-    # ── Option A: build from source ──────────────────────────────────────────
-    # build:
-    #   context: ./server
-    #   dockerfile: Dockerfile
+    # ── Coolify builds the image directly from the Dockerfile ────────────────
+    # No registry authentication required — Coolify clones the repo and builds.
+    build:
+      context: .
+      dockerfile: Dockerfile
 
-    # ── Option B: pull pre-built image from GHCR (used by Coolify) ───────────
-    image: ghcr.io/punjet/ankiserver:latest
+    # ── Alternative: pull a pre-built image from GHCR ────────────────────────
+    # Uncomment the line below and comment out the `build:` block above
+    # if you prefer to pull rather than build.
+    # Requires the GHCR package to be public:
+    #   GitHub → Your Profile → Packages → ankiserver → Package Settings → Public
+    # image: ghcr.io/punjet/ankiserver:latest
 
     container_name: anki-server
     restart: unless-stopped
 
     ports:
-      - "5005:5005"
+      - "${PORT:-5005}:${PORT:-5005}"
 
     volumes:
-      # Buffer & config data persisted on the host.
+      # Card buffer and data — persisted on the host across restarts.
       - anki_data:/data
 
     environment:
       PORT: "${PORT:-5005}"
-      # On macOS Docker Desktop, host.docker.internal resolves to the Mac.
-      # On Linux, add extra_hosts below.
+      # On macOS Docker Desktop, host.docker.internal resolves to your Mac automatically.
+      # On Linux (VPS/Coolify), extra_hosts below maps it to the host gateway.
       ANKI_URL: "${ANKI_URL:-http://host.docker.internal:8765}"
       DEEPL_KEY: "${DEEPL_KEY:-}"
-      BUFFER_FILE: "/data/anki_buffer.json"
-      LOG_LEVEL: "${LOG_LEVEL:-info}"
       OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
       OPENAI_MODEL: "${OPENAI_MODEL:-gpt-4o-mini}"
       MAX_CARDS_PER_REQUEST: "${MAX_CARDS_PER_REQUEST:-5}"
       GRAMMAR_DECK_NAME: "${GRAMMAR_DECK_NAME:-GrammarErrors}"
       GRAMMAR_MODEL_NAME: "${GRAMMAR_MODEL_NAME:-GrammarErrors}"
+      BUFFER_FILE: "/data/anki_buffer.json"
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+      API_KEY: "${API_KEY:-}"
+      RATE_LIMIT_DEFAULT: "${RATE_LIMIT_DEFAULT:-60}"
+      RATE_LIMIT_GRAMMAR: "${RATE_LIMIT_GRAMMAR:-10}"
+      MAX_BODY_BYTES: "${MAX_BODY_BYTES:-65536}"
+      MAX_TEXT_LENGTH: "${MAX_TEXT_LENGTH:-4000}"
+      TRUSTED_PROXIES: "${TRUSTED_PROXIES:-true}"
 
-    # Linux only — maps host.docker.internal to the host gateway.
+    # Maps host.docker.internal → host gateway on Linux/VPS.
+    # On macOS Docker Desktop this is handled automatically.
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:5005/health || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:${PORT:-5005}/health || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 10s
+      start_period: 15s
 
 volumes:
   anki_data:
