@@ -11,11 +11,12 @@ import (
 	"time"
 
 	"github.com/punjet/ankiserver/internal/buffer"
+	aiClient "github.com/punjet/ankiserver/internal/ai"
 )
 
 // Add handles POST /add — saves a card to the buffer and returns immediately.
-// Audio enrichment is NOT included (requires local yt-dlp/ffmpeg/whisper).
-func Add(buf *buffer.Buffer, logger *slog.Logger) http.HandlerFunc {
+// It also launches a background goroutine to fetch TTS audio via OpenAI if configured.
+func Add(buf *buffer.Buffer, getAI func() *aiClient.Client, logger *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var data buffer.Note
 		if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
@@ -77,6 +78,32 @@ func Add(buf *buffer.Buffer, logger *slog.Logger) http.HandlerFunc {
 		}
 
 		logger.Info("📥 Added to buffer", "word", word, "domain", domainTag, "url", truncate(sourceURL, 60))
+
+		// Launch background TTS fetch
+		if ai := getAI(); ai != nil {
+			contextStr := nestedStr(data, "params", "note", "fields", "Context")
+			go func(word, ctx, id string) {
+				ttsText := word
+				if ctx != "" {
+					ttsText = word + ". " + ctx
+				}
+				logger.Info("Starting TTS background fetch", "word", word)
+				base64Audio, err := ai.TextToSpeech(ttsText, "alloy")
+				if err != nil {
+					logger.Error("TTS failed", "word", word, "err", err)
+					return
+				}
+				err = buf.UpdateNote(id, func(n buffer.Note) {
+					n["_audio_base64"] = base64Audio
+				})
+				if err != nil {
+					logger.Error("Failed to update note with audio", "word", word, "err", err)
+				} else {
+					logger.Info("TTS audio saved to buffer", "word", word)
+				}
+			}(word, contextStr, bufID)
+		}
+
 		writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
 	}
 }

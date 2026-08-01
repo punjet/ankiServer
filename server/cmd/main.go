@@ -163,7 +163,7 @@ func main() {
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.RateLimiter(cfg.RateLimitDefault, 60))
 
-		r.Post("/add", handlers.Add(buf, logger))
+		r.Post("/add", handlers.Add(buf, ai.get, logger))
 		r.Post("/sync", handlers.Sync(buf, ankiCl, logger))
 		r.Post("/translate", handlers.Translate(deepLStore.Get, logger))
 		r.Post("/check", handlers.Check(ankiCl, wordDeckName, logger))

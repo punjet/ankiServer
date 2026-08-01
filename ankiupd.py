@@ -74,6 +74,26 @@ def main():
         if "_buf_id" in payload:
             del payload["_buf_id"]
             
+        audio_base64 = payload.pop("_audio_base64", None)
+        if audio_base64:
+            safe_word = "".join(c for c in word if c.isalnum() or c in (" ", "_", "-")).replace(" ", "_")
+            filename = f"tts_{safe_word}_{buf_id}.mp3"
+            
+            media_payload = {
+                "action": "storeMediaFile",
+                "version": 6,
+                "params": {
+                    "filename": filename,
+                    "data": audio_base64
+                }
+            }
+            media_res = request_json(LOCAL_ANKI, method="POST", data=media_payload)
+            if media_res and media_res.get("error") is None:
+                if "params" in payload and "note" in payload["params"] and "fields" in payload["params"]["note"]:
+                    payload["params"]["note"]["fields"]["Audio"] = f"[sound:{filename}]"
+            else:
+                print(f"(ОШИБКА TTS: {media_res.get('error') if media_res else 'no response'}) ", end="")
+
         print(f"Добавляем: {word}... ", end="")
         
         # Отправляем в AnkiConnect
