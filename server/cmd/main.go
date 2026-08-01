@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -78,7 +79,19 @@ func main() {
 	if cfg.LogLevel == "debug" {
 		logLevel = slog.LevelDebug
 	}
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel}))
+
+	var logWriter io.Writer = os.Stdout
+	logPath := os.Getenv("LOG_FILE")
+	if logPath != "" {
+		f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err == nil {
+			logWriter = io.MultiWriter(os.Stdout, f)
+		} else {
+			fmt.Printf("Failed to open log file %s: %v\n", logPath, err)
+		}
+	}
+
+	logger := slog.New(slog.NewTextHandler(logWriter, &slog.HandlerOptions{Level: logLevel}))
 	slog.SetDefault(logger)
 
 	// ── Security startup warnings ─────────────────────────────────────────────
