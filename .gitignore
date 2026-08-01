@@ -29,3 +29,8 @@ venv/
 
 # Anki data (managed by Docker volume)
 anki_buffer.json
+
+# Old Python server and userscripts
+anki_daemon.py
+userscript.js
+for_github/
