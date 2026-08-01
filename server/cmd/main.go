@@ -145,10 +145,10 @@ func main() {
 	r.Use(middleware.MaxBodySize(cfg.MaxBodyBytes))
 	r.Use(chimiddleware.RealIP)
 	r.Use(chimiddleware.RequestID)
+	r.Use(middleware.CORS)
 	r.Use(middleware.Auth(cfg.APIKey))
 	r.Use(chimiddleware.Recoverer)
 	r.Use(chimiddleware.Logger)
-	r.Use(middleware.CORS)
 
 	// ── Routes ────────────────────────────────────────────────────────────────
 
