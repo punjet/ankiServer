@@ -59,6 +59,18 @@ func (s *aiStore) set(key string) {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
+		port := os.Getenv("PORT")
+		if port == "" {
+			port = "5005"
+		}
+		resp, err := http.Get("http://localhost:" + port + "/health")
+		if err != nil || resp.StatusCode != http.StatusOK {
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+
 	cfg := config.Load()
 
 	// ── Logger ────────────────────────────────────────────────────────────────
@@ -157,6 +169,8 @@ func main() {
 		r.Post("/check", handlers.Check(ankiCl, wordDeckName, logger))
 		r.Get("/config", handlers.Config(deepLStore, ai.get, ai.set, logger))
 		r.Post("/config", handlers.Config(deepLStore, ai.get, ai.set, logger))
+		r.Get("/buffer", handlers.GetBuffer(buf, logger))
+		r.Delete("/buffer", handlers.DeleteBuffer(buf, logger))
 	})
 
 	// Grammar endpoint — tighter limit (10 req/min) because each request

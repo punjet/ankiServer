@@ -1,0 +1,108 @@
+#!/usr/bin/env python3
+import urllib.request
+import urllib.error
+import json
+import os
+import sys
+
+# ==========================================
+# CONFIGURATION
+# ==========================================
+# Укажите адрес вашего облачного сервера (VPS) с anki_server
+SERVER_URL = os.getenv("ANKI_SERVER_URL", "https://your-anki-server.com")
+# Ваш секретный API_KEY от облачного сервера
+API_KEY = os.getenv("ANKI_API_KEY", "your-secret-key")
+# Адрес локального AnkiConnect (обычно не меняется)
+LOCAL_ANKI = "http://127.0.0.1:8765"
+# ==========================================
+
+def request_json(url, method="GET", data=None, headers=None):
+    if headers is None:
+        headers = {}
+    
+    encoded_data = None
+    if data is not None:
+        encoded_data = json.dumps(data).encode('utf-8')
+        headers["Content-Type"] = "application/json"
+        
+    req = urllib.request.Request(url, data=encoded_data, headers=headers, method=method)
+    
+    try:
+        with urllib.request.urlopen(req, timeout=10) as response:
+            body = response.read().decode('utf-8')
+            if not body:
+                return {}
+            return json.loads(body)
+    except urllib.error.HTTPError as e:
+        print(f"HTTP Error {e.code}: {url}")
+        print(e.read().decode('utf-8'))
+        return None
+    except Exception as e:
+        print(f"Request failed ({url}): {e}")
+        return None
+
+def main():
+    if SERVER_URL == "https://your-anki-server.com":
+        print("Пожалуйста, откройте этот скрипт и настройте SERVER_URL и API_KEY.")
+        sys.exit(1)
+
+    print(f"Связываемся с сервером {SERVER_URL}...")
+    headers = {"X-API-Key": API_KEY}
+    
+    # 1. Получаем буфер
+    notes = request_json(f"{SERVER_URL}/buffer", headers=headers)
+    
+    if notes is None:
+        print("Не удалось получить буфер.")
+        sys.exit(1)
+        
+    if len(notes) == 0:
+        print("Буфер пуст. Новых слов нет.")
+        sys.exit(0)
+        
+    print(f"Найдено карточек в буфере: {len(notes)}")
+    
+    successful_ids = []
+    
+    # 2. Отправляем в локальный Anki
+    for note in notes:
+        buf_id = note.get("_buf_id")
+        word = note.get("params", {}).get("note", {}).get("fields", {}).get("Word", "Unknown")
+        
+        # Удаляем _buf_id перед отправкой в Anki (AnkiConnect ругается на лишние поля)
+        payload = note.copy()
+        if "_buf_id" in payload:
+            del payload["_buf_id"]
+            
+        print(f"Добавляем: {word}... ", end="")
+        
+        # Отправляем в AnkiConnect
+        res = request_json(LOCAL_ANKI, method="POST", data=payload)
+        
+        if res is None:
+            print("ОШИБКА (AnkiConnect недоступен. Anki открыт?)")
+            continue
+            
+        error = res.get("error")
+        if error is None:
+            print("ОК")
+            successful_ids.append(buf_id)
+        elif "duplicate" in str(error).lower():
+            print("ДУБЛИКАТ (уже есть в колоде)")
+            successful_ids.append(buf_id) # Считаем успешным, чтобы убрать из буфера
+        else:
+            print(f"ОШИБКА ({error})")
+            
+    # 3. Удаляем успешно добавленные из буфера на сервере
+    if successful_ids:
+        print(f"\nОчищаем {len(successful_ids)} карточек из серверного буфера...")
+        res = request_json(f"{SERVER_URL}/buffer", method="DELETE", data={"ids": successful_ids}, headers=headers)
+        if res and res.get("status") == "success":
+            print("Готово! Буфер очищен.")
+        else:
+            print("Не удалось очистить буфер на сервере.")
+    else:
+        print("\nНет новых успешных карточек для очистки.")
+
+if __name__ == "__main__":
+    main()

@@ -31,14 +31,14 @@ COPY --from=builder /build/anki-server /anki-server
 VOLUME ["/data"]
 
 # Default environment — override in Coolify / docker-compose.
-ENV PORT=5005 \
+ENV PORT=3000 \
     ANKI_URL=http://host.docker.internal:8765 \
     BUFFER_FILE=/data/anki_buffer.json \
     LOG_LEVEL=info
 
-EXPOSE 5005
+EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-    CMD ["/anki-server"]
+    CMD ["/anki-server", "healthcheck"]
 
 ENTRYPOINT ["/anki-server"]
