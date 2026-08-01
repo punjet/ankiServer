@@ -30,12 +30,13 @@ func Grammar(
 	buf *buffer.Buffer,
 	getAI func() *ai.Client,
 	analyzer *grammar.Analyzer,
+	maxTextLength int,
 	logger *slog.Logger,
 ) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req GrammarRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
 			return
 		}
 
@@ -45,11 +46,24 @@ func Grammar(
 			return
 		}
 
+		// Unicode-aware length check.
+		runes := []rune(req.Text)
+		if len(runes) > maxTextLength {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
+				"error":      "text_too_long",
+				"detail":     "text exceeds maximum allowed length",
+				"max_length": maxTextLength,
+				"your_length": len(runes),
+			})
+			return
+		}
+
 		// Minimum length guard — single words are handled by /translate.
 		words := strings.Fields(req.Text)
 		if len(words) < 3 {
 			writeJSON(w, http.StatusBadRequest, map[string]string{
-				"error": "text too short — use /translate for single words (min 3 words for grammar analysis)",
+				"error":  "text_too_short",
+				"detail": "minimum 3 words required — use POST /translate for single words",
 			})
 			return
 		}

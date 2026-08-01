@@ -36,6 +36,30 @@ type Config struct {
 
 	// GrammarModelName is the Anki note type for grammar cards.
 	GrammarModelName string
+
+	// ── Security ──────────────────────────────────────────────────────────────
+
+	// APIKey is the server's own secret key that clients must send in
+	// the X-API-Key header (or Authorization: Bearer <key>).
+	// If empty, authentication is disabled (useful for local-only setups).
+	APIKey string
+
+	// RateLimitDefault is the max requests per minute per IP for general endpoints.
+	RateLimitDefault int
+
+	// RateLimitGrammar is the max requests per minute per IP for /grammar
+	// (AI calls are expensive, so a tighter limit is applied).
+	RateLimitGrammar int
+
+	// MaxBodyBytes is the maximum allowed request body size in bytes.
+	MaxBodyBytes int64
+
+	// MaxTextLength is the maximum allowed length of the "text" field in /grammar.
+	MaxTextLength int
+
+	// TrustedProxies controls whether X-Forwarded-For is trusted for real IP.
+	// Set to true only when behind a known reverse proxy (Coolify, nginx, etc.).
+	TrustedProxies bool
 }
 
 // Load reads configuration from environment variables and applies defaults.
@@ -51,6 +75,14 @@ func Load() *Config {
 		MaxCardsPerRequest: getEnvInt("MAX_CARDS_PER_REQUEST", 5),
 		GrammarDeckName:    getEnv("GRAMMAR_DECK_NAME", "GrammarErrors"),
 		GrammarModelName:   getEnv("GRAMMAR_MODEL_NAME", "GrammarErrors"),
+
+		// Security
+		APIKey:           getEnv("API_KEY", ""),
+		RateLimitDefault: getEnvInt("RATE_LIMIT_DEFAULT", 60),
+		RateLimitGrammar: getEnvInt("RATE_LIMIT_GRAMMAR", 10),
+		MaxBodyBytes:     int64(getEnvInt("MAX_BODY_BYTES", 65536)), // 64 KB
+		MaxTextLength:    getEnvInt("MAX_TEXT_LENGTH", 4000),
+		TrustedProxies:   getEnvBool("TRUSTED_PROXIES", true),
 	}
 }
 
@@ -69,4 +101,12 @@ func getEnvInt(key string, fallback int) int {
 		}
 	}
 	return fallback
+}
+
+func getEnvBool(key string, fallback bool) bool {
+	v, ok := os.LookupEnv(key)
+	if !ok {
+		return fallback
+	}
+	return v == "1" || v == "true" || v == "yes"
 }

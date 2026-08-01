@@ -24,8 +24,8 @@ import (
 )
 
 const (
-	wordModelName    = "WordsFromSafari"
-	wordDeckName     = "WordsFromSafari"
+	wordModelName = "WordsFromSafari"
+	wordDeckName  = "WordsFromSafari"
 )
 
 var wordRequiredFields = []string{
@@ -33,10 +33,13 @@ var wordRequiredFields = []string{
 	"Audio", "Spelling", "SpellingTranscript", "SourceURL", "DateAdded", "SeenCount",
 }
 
-// aiStore is a thread-safe holder for the OpenAI client (key can be updated at runtime).
+// aiStore is a thread-safe holder for the OpenAI client.
+// The key can be updated at runtime via POST /config without restart.
 type aiStore struct {
 	mu     sync.RWMutex
 	client *aiClient.Client
+	model  string
+	max    int
 }
 
 func (s *aiStore) get() *aiClient.Client {
@@ -45,11 +48,11 @@ func (s *aiStore) get() *aiClient.Client {
 	return s.client
 }
 
-func (s *aiStore) set(key, model string, maxCards int) {
+func (s *aiStore) set(key string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if key != "" {
-		s.client = aiClient.New(key, model, maxCards)
+		s.client = aiClient.New(key, s.model, s.max)
 	} else {
 		s.client = nil
 	}
@@ -58,7 +61,7 @@ func (s *aiStore) set(key, model string, maxCards int) {
 func main() {
 	cfg := config.Load()
 
-	// --- Logger ---
+	// ── Logger ────────────────────────────────────────────────────────────────
 	logLevel := slog.LevelInfo
 	if cfg.LogLevel == "debug" {
 		logLevel = slog.LevelDebug
@@ -66,7 +69,14 @@ func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel}))
 	slog.SetDefault(logger)
 
-	// --- Buffer ---
+	// ── Security startup warnings ─────────────────────────────────────────────
+	if cfg.APIKey == "" {
+		logger.Warn("⚠️  API_KEY not set — server is open without authentication! Set API_KEY in production.")
+	} else {
+		logger.Info("🔒 API key authentication enabled")
+	}
+
+	// ── Buffer ────────────────────────────────────────────────────────────────
 	buf, err := buffer.New(cfg.BufferFile)
 	if err != nil {
 		logger.Error("Failed to initialize buffer", "err", err)
@@ -74,91 +84,107 @@ func main() {
 	}
 	logger.Info("💾 Buffer ready", "file", cfg.BufferFile)
 
-	// --- Anki client ---
+	// ── Anki client ───────────────────────────────────────────────────────────
 	ankiCl := anki.New(cfg.AnkiURL)
 	logger.Info("🃏 AnkiConnect client ready", "url", cfg.AnkiURL)
 
-	// Verify model fields in the background (Anki might not be open yet).
+	// Verify/create model fields in the background (Anki may not be open yet).
 	go func() {
-		time.Sleep(2 * time.Second)
+		time.Sleep(3 * time.Second)
 		if err := ankiCl.EnsureModelFields(wordModelName, wordRequiredFields); err != nil {
-			logger.Warn("⚠️  EnsureModelFields (word model) — Anki not running?", "err", err)
+			logger.Warn("⚠️  EnsureModelFields (word model)", "err", err)
 		} else {
 			logger.Info("✅ Word model fields verified")
 		}
 		if err := ankiCl.EnsureModelFields(cfg.GrammarModelName, grammar.RequiredFields()); err != nil {
-			logger.Warn("⚠️  EnsureModelFields (grammar model) — Anki not running?", "err", err)
+			logger.Warn("⚠️  EnsureModelFields (grammar model)", "err", err)
 		} else {
 			logger.Info("✅ Grammar model fields verified")
 		}
 	}()
 
-	// --- DeepL key store ---
+	// ── DeepL key store ───────────────────────────────────────────────────────
 	deepLStore := handlers.NewDeepLKeyStore(cfg.DeepLKey)
 	if cfg.DeepLKey != "" {
-		logger.Info("🔑 DeepL key loaded from environment")
+		logger.Info("🔑 DeepL key loaded")
 	} else {
-		logger.Warn("⚠️  DEEPL_KEY not set — /translate will error until configured")
+		logger.Warn("⚠️  DEEPL_KEY not set — /translate requires it")
 	}
 
-	// --- AI (OpenAI) store ---
-	ai := &aiStore{}
-	ai.set(cfg.OpenAIKey, cfg.OpenAIModel, cfg.MaxCardsPerRequest)
+	// ── AI (OpenAI) store ─────────────────────────────────────────────────────
+	ai := &aiStore{model: cfg.OpenAIModel, max: cfg.MaxCardsPerRequest}
+	ai.set(cfg.OpenAIKey)
 	if cfg.OpenAIKey != "" {
 		logger.Info("🤖 OpenAI client ready", "model", cfg.OpenAIModel)
 	} else {
-		logger.Warn("⚠️  OPENAI_API_KEY not set — /grammar will error until configured")
+		logger.Warn("⚠️  OPENAI_API_KEY not set — /grammar requires it")
 	}
 
-	// --- Grammar analyzer ---
+	// ── Grammar analyzer ──────────────────────────────────────────────────────
 	grammarAnalyzer := grammar.New(cfg.GrammarDeckName, cfg.GrammarModelName)
 
-	// --- Router ---
+	// ── Router ────────────────────────────────────────────────────────────────
 	r := chi.NewRouter()
-	r.Use(chimiddleware.Recoverer)
-	r.Use(chimiddleware.RequestID)
+
+	// ── Global middleware (applied to ALL routes) ─────────────────────────────
+	// Order matters: security headers first, then body limit, then real IP,
+	// then auth, then rate limiter, then logging/recovery last.
+	r.Use(middleware.SecurityHeaders)
+	r.Use(middleware.MaxBodySize(cfg.MaxBodyBytes))
 	r.Use(chimiddleware.RealIP)
+	r.Use(chimiddleware.RequestID)
+	r.Use(middleware.Auth(cfg.APIKey))
+	r.Use(chimiddleware.Recoverer)
 	r.Use(chimiddleware.Logger)
 	r.Use(middleware.CORS)
 
-	// Vocabulary / word endpoints.
-	r.Post("/add", handlers.Add(buf, logger))
-	r.Post("/sync", handlers.Sync(buf, ankiCl, logger))
-	r.Post("/translate", handlers.Translate(deepLStore.Get, logger))
-	r.Post("/check", handlers.Check(ankiCl, wordDeckName, logger))
+	// ── Routes ────────────────────────────────────────────────────────────────
 
-	// Grammar analysis endpoint.
-	r.Post("/grammar", handlers.Grammar(buf, ai.get, grammarAnalyzer, logger))
-
-	// Config endpoint (supports updating DeepL + OpenAI keys at runtime).
-	r.Get("/config", handlers.Config(deepLStore, ai.get, func(key string) {
-		ai.set(key, cfg.OpenAIModel, cfg.MaxCardsPerRequest)
-	}, logger))
-	r.Post("/config", handlers.Config(deepLStore, ai.get, func(key string) {
-		ai.set(key, cfg.OpenAIModel, cfg.MaxCardsPerRequest)
-	}, logger))
-
-	// Health check for Docker/Coolify.
+	// Health check — always public, no auth, no rate limit.
+	// (Auth middleware explicitly bypasses /health)
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"status":"ok"}`)
+		fmt.Fprint(w, `{"status":"ok","version":"2.0"}`)
 	})
 
-	// --- HTTP Server with graceful shutdown ---
+	// Standard endpoints — 60 req/min per IP (default).
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.RateLimiter(cfg.RateLimitDefault, 60))
+
+		r.Post("/add", handlers.Add(buf, logger))
+		r.Post("/sync", handlers.Sync(buf, ankiCl, logger))
+		r.Post("/translate", handlers.Translate(deepLStore.Get, logger))
+		r.Post("/check", handlers.Check(ankiCl, wordDeckName, logger))
+		r.Get("/config", handlers.Config(deepLStore, ai.get, ai.set, logger))
+		r.Post("/config", handlers.Config(deepLStore, ai.get, ai.set, logger))
+	})
+
+	// Grammar endpoint — tighter limit (10 req/min) because each request
+	// costs an OpenAI API call.
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.RateLimiter(cfg.RateLimitGrammar, 60))
+
+		r.Post("/grammar", handlers.Grammar(buf, ai.get, grammarAnalyzer, cfg.MaxTextLength, logger))
+	})
+
+	// ── HTTP server ───────────────────────────────────────────────────────────
 	srv := &http.Server{
-		Addr:         ":" + cfg.Port,
-		Handler:      r,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 90 * time.Second, // longer for AI calls
-		IdleTimeout:  60 * time.Second,
+		Addr:    ":" + cfg.Port,
+		Handler: r,
+		// Timeouts prevent slow-loris and resource exhaustion attacks.
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      90 * time.Second, // generous for AI calls
+		IdleTimeout:       60 * time.Second,
 	}
 
+	// ── Graceful shutdown ─────────────────────────────────────────────────────
 	done := make(chan struct{})
 	go func() {
 		quit := make(chan os.Signal, 1)
 		signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-		<-quit
-		logger.Info("🛑 Shutdown signal received")
+		sig := <-quit
+		logger.Info("🛑 Shutdown signal received", "signal", sig)
 
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
@@ -168,11 +194,11 @@ func main() {
 		close(done)
 	}()
 
-	logger.Info("🚀 Anki server started", "port", cfg.Port)
+	logger.Info("🚀 Anki server started", "addr", ":"+cfg.Port)
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		logger.Error("Server error", "err", err)
+		logger.Error("Server listen error", "err", err)
 		os.Exit(1)
 	}
 	<-done
-	logger.Info("👋 Server stopped")
+	logger.Info("👋 Server stopped gracefully")
 }
