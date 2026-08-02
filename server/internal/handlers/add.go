@@ -18,6 +18,8 @@ import (
 // It also launches a background goroutine to fetch TTS audio via OpenAI if configured.
 func Add(buf *buffer.Buffer, getAI func() *aiClient.Client, logger *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		logger.Info("Add handler started", "method", r.Method, "path", r.URL.Path)
+		logger.Info("Add handler started", "method", r.Method, "path", r.URL.Path)
 		var data buffer.Note
 		if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"status": "error", "detail": "invalid JSON"})
@@ -104,6 +106,8 @@ func Add(buf *buffer.Buffer, getAI func() *aiClient.Client, logger *slog.Logger)
 			}(word, contextStr, bufID)
 		}
 
+		logger.Info("Add handler completed", "word", word, "status", "saved")
+		logger.Info("Add handler completed", "word", word, "status", "saved")
 		writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
 	}
 }
