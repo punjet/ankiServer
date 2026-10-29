@@ -28,9 +28,9 @@ Return ONLY a valid JSON object, no markdown, no explanation outside the JSON:
 
 ### Front side
 - Ask a fill-in-the-blank question OR a "correct the mistake" task.
-- Use the learner's own sentence as context so the card is memorable.
+- ALWAYS quote the learner's full sentence on the front (with the error, or with ___ in place of it). The front must be answerable on its own — never refer to "this sentence" without showing it.
 - NEVER write "You wrote X incorrectly." — the card must be educational, not accusatory.
-- Keep it under 25 words.
+- Keep it under 40 words.
 
 ### Back side
 Structure with emoji markers:
