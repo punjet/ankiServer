@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -95,10 +96,14 @@ func main() {
 	slog.SetDefault(logger)
 
 	// ── Security startup warnings ─────────────────────────────────────────────
-	if cfg.APIKey == "" {
-		logger.Warn("⚠️  API_KEY not set — server is open without authentication! Set API_KEY in production.")
+	if len(cfg.AllAPIKeys()) == 0 {
+		if !cfg.AllowNoAuth {
+			logger.Error("API_KEY is not set — refusing to start an open server. Set API_KEY (openssl rand -hex 32) or ALLOW_NO_AUTH=true for a local-only setup.")
+			os.Exit(1)
+		}
+		logger.Warn("⚠️  ALLOW_NO_AUTH=true — server is open without authentication!")
 	} else {
-		logger.Info("🔒 API key authentication enabled")
+		logger.Info("🔒 API key authentication enabled", "keys", len(cfg.AllAPIKeys()))
 	}
 
 	// ── Buffer ────────────────────────────────────────────────────────────────
@@ -107,6 +112,7 @@ func main() {
 		logger.Error("Failed to initialize buffer", "err", err)
 		os.Exit(1)
 	}
+	buf.MaxNotes = cfg.MaxBufferNotes
 	logger.Info("💾 Buffer ready", "file", cfg.BufferFile)
 
 	// ── Anki client ───────────────────────────────────────────────────────────
@@ -156,10 +162,14 @@ func main() {
 	// then auth, then rate limiter, then logging/recovery last.
 	r.Use(middleware.SecurityHeaders)
 	r.Use(middleware.MaxBodySize(cfg.MaxBodyBytes))
-	r.Use(chimiddleware.RealIP)
+	// Forwarded headers are only honoured behind a known proxy; otherwise any client
+	// could spoof X-Forwarded-For and dodge the per-IP limits.
+	if cfg.TrustedProxies {
+		r.Use(chimiddleware.RealIP)
+	}
 	r.Use(chimiddleware.RequestID)
 	r.Use(middleware.CORS)
-	r.Use(middleware.Auth(cfg.APIKey))
+	r.Use(middleware.Auth(cfg.AllAPIKeys(), cfg.AuthFailLimit))
 	r.Use(chimiddleware.Recoverer)
 	r.Use(chimiddleware.Logger)
 
@@ -181,7 +191,13 @@ func main() {
 		r.Post("/translate", handlers.Translate(deepLStore.Get, logger))
 		r.Post("/check", handlers.Check(ankiCl, wordDeckName, logger))
 		r.Get("/config", handlers.Config(deepLStore, ai.get, ai.set, logger))
-		r.Post("/config", handlers.Config(deepLStore, ai.get, ai.set, logger))
+		if cfg.ConfigWritable {
+			r.Post("/config", handlers.Config(deepLStore, ai.get, ai.set, logger))
+		} else {
+			r.Post("/config", func(w http.ResponseWriter, r *http.Request) {
+				writeJSONError(w, http.StatusForbidden, "config_read_only")
+			})
+		}
 		r.Get("/buffer", handlers.GetBuffer(buf, logger))
 		r.Delete("/buffer", handlers.DeleteBuffer(buf, logger))
 	})
@@ -196,7 +212,7 @@ func main() {
 
 	// ── HTTP server ───────────────────────────────────────────────────────────
 	srv := &http.Server{
-		Addr:    ":" + cfg.Port,
+		Addr:    net.JoinHostPort(cfg.Host, cfg.Port),
 		Handler: r,
 		// Timeouts prevent slow-loris and resource exhaustion attacks.
 		ReadHeaderTimeout: 5 * time.Second,
@@ -221,11 +237,32 @@ func main() {
 		close(done)
 	}()
 
-	logger.Info("🚀 Anki server started", "addr", ":"+cfg.Port)
+	// When launched by the ankiHelper macOS app, exit if the app dies so no
+	// orphan keeps holding the port. The SIGTERM runs the graceful shutdown above.
+	if os.Getenv("EXIT_WITH_PARENT") == "1" {
+		parent := os.Getppid()
+		go func() {
+			for range time.Tick(time.Second) {
+				if os.Getppid() != parent {
+					logger.Info("👋 Parent process exited — shutting down")
+					_ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
+					return
+				}
+			}
+		}()
+	}
+
+	logger.Info("🚀 Anki server started", "addr", srv.Addr)
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		logger.Error("Server listen error", "err", err)
 		os.Exit(1)
 	}
 	<-done
 	logger.Info("👋 Server stopped gracefully")
+}
+
+func writeJSONError(w http.ResponseWriter, status int, code string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	fmt.Fprintf(w, `{"error":%q}`, code)
 }

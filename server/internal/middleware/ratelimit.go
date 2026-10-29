@@ -44,6 +44,20 @@ func (b *bucket) allow() bool {
 	return true
 }
 
+// full reports whether the window is exhausted, without recording a request.
+func (b *bucket) full() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	cutoff := time.Now().Add(-time.Duration(b.windowSec) * time.Second)
+	n := 0
+	for _, t := range b.requests {
+		if t.After(cutoff) {
+			n++
+		}
+	}
+	return n >= b.limit
+}
+
 // store holds per-IP buckets.
 type store struct {
 	mu      sync.Mutex

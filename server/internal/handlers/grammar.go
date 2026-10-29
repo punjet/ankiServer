@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -111,7 +112,11 @@ func Grammar(
 		notes := analyzer.BuildNotes(result, req.Text, req.SourceURL)
 		for _, note := range notes {
 			if err := buf.Append(note); err != nil {
-				logger.Error("buffer append failed", "err", err)
+				if errors.Is(err, buffer.ErrFull) {
+				writeJSON(w, http.StatusInsufficientStorage, map[string]string{"error": "buffer_full", "detail": "buffer is full — sync with Anki first"})
+				return
+			}
+			logger.Error("buffer append failed", "err", err)
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save cards"})
 				return
 			}

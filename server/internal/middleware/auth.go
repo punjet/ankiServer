@@ -13,18 +13,23 @@ import (
 //  1. X-API-Key: <key>           header
 //  2. Authorization: Bearer <key> header
 //
-// If apiKey is empty the middleware is a no-op — all requests pass through.
-// This allows running without auth in trusted local environments.
+// Any of `keys` is accepted (one per device). If keys is empty the middleware is
+// a no-op — all requests pass through, for trusted local environments.
+//
+// An IP that fails `failLimit` times within a minute gets 429 until the window
+// passes, even with a correct key, so keys can't be guessed at network speed.
 //
 // Timing-safe comparison (crypto/subtle) is used to prevent timing attacks.
-func Auth(apiKey string) func(http.Handler) http.Handler {
+func Auth(keys []string, failLimit int) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
-		if apiKey == "" {
-			// Auth disabled — pass all requests through.
+		if len(keys) == 0 {
 			return next
 		}
-
-		expectedKey := []byte(apiKey)
+		expected := make([][]byte, len(keys))
+		for i, k := range keys {
+			expected[i] = []byte(k)
+		}
+		failures := newStore(max(1, failLimit), 60)
 
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// /health is always public — needed for Docker/Coolify health checks.
@@ -33,16 +38,27 @@ func Auth(apiKey string) func(http.Handler) http.Handler {
 				return
 			}
 
+			ip := realIP(r)
+			attempts := failures.get(ip)
+			if attempts.full() {
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Retry-After", "60")
+				w.WriteHeader(http.StatusTooManyRequests)
+				w.Write([]byte(`{"error":"too_many_auth_failures","detail":"too many invalid API keys — retry after 60s"}`))
+				return
+			}
+
 			provided := extractKey(r)
 			if provided == "" {
-				log.Printf("Auth failed: missing API key from IP %s", r.RemoteAddr)
+				attempts.allow()
+				log.Printf("Auth failed: missing API key from IP %s", ip)
 				writeAuthError(w, "missing API key — provide X-API-Key header or Authorization: Bearer <key>")
 				return
 			}
 
-			// Constant-time comparison to prevent timing side-channel attacks.
-			if subtle.ConstantTimeCompare([]byte(provided), expectedKey) != 1 {
-				log.Printf("Auth failed: invalid API key from IP %s", r.RemoteAddr)
+			if !matches(provided, expected) {
+				attempts.allow()
+				log.Printf("Auth failed: invalid API key from IP %s", ip)
 				writeAuthError(w, "invalid API key")
 				return
 			}
@@ -50,6 +66,16 @@ func Auth(apiKey string) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// matches compares against every key so the timing doesn't reveal which one (if any) matched.
+func matches(provided string, expected [][]byte) bool {
+	p := []byte(provided)
+	ok := 0
+	for _, e := range expected {
+		ok |= subtle.ConstantTimeCompare(p, e)
+	}
+	return ok == 1
 }
 
 // extractKey reads the API key from request headers.

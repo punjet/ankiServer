@@ -35,3 +35,6 @@ anki_daemon.py
 userscript.js
 for_github/
 .omo/
+
+# Agent tooling state
+.omc/

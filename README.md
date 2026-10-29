@@ -20,7 +20,7 @@
 ### Переменные окружения (Environment Variables)
 Добавьте следующие переменные:
 ```ini
-# Ключ от сервера (вписывается в userscript.js)
+# Ключ от сервера (вписывается в client/userscript.user.js)
 API_KEY=your-secret-key
 
 # API-ключи для перевода и аудио
@@ -37,11 +37,11 @@ BUFFER_FILE=/app/data/anki_buffer.json
 
 ## 💻 Настройка клиента (Mac)
 
-1. **Tampermonkey**: Скопируйте содержимое `userscript.js` в расширение Tampermonkey. В коде укажите ваш `API_KEY`.
-2. **Терминал**: В файле `ankiupd.py` укажите адрес вашего сервера `SERVER_URL` и `API_KEY`.
+1. **Tampermonkey**: Скопируйте содержимое `client/userscript.user.js` в расширение Tampermonkey. В коде укажите ваш `API_KEY`.
+2. **Терминал**: В файле `client/ankiupd.py` укажите адрес вашего сервера `SERVER_URL` и `API_KEY`.
 3. Для удобства добавьте алиас в `~/.zshrc`:
    ```bash
-   alias ankiupd="python3 /Users/YOUR_NAME/anki_server/ankiupd.py"
+   alias ankiupd="python3 /Users/YOUR_NAME/ankiServer/client/ankiupd.py"
    ```
 4. Теперь, чтобы забрать карточки с сервера и отправить в Anki, просто введите команду `ankiupd` в терминале.
 
@@ -66,7 +66,7 @@ BUFFER_FILE=/app/data/anki_buffer.json
 | Переменная | Описание |
 |---|---|
 | `PORT` | Порт HTTP сервера (по умолчанию `5005`) |
-| `API_KEY` | Секретный ключ для защиты вашего сервера |
+| `API_KEY` | Секретный ключ для защиты вашего сервера. **Обязателен**: без него сервер не стартует (`ALLOW_NO_AUTH=true` — только для локального сервера) |
 | `DEEPL_KEY` | API ключ DeepL (обязательный для `/translate`) |
 | `OPENAI_API_KEY` | Ключ OpenAI (для озвучки и проверки грамматики) |
 | `OPENAI_MODEL` | Модель для грамматики (по умолчанию `gpt-4o-mini`) |

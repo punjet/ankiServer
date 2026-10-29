@@ -3,12 +3,17 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 )
 
 // Config holds all server configuration loaded from environment variables.
 type Config struct {
 	// Port the HTTP server listens on.
 	Port string
+
+	// Host is the interface to bind. Empty means all interfaces (Docker);
+	// "127.0.0.1" keeps the server reachable only through a local proxy such as `tailscale serve`.
+	Host string
 
 	// AnkiURL is the URL of the local AnkiConnect add-on.
 	AnkiURL string
@@ -41,8 +46,26 @@ type Config struct {
 
 	// APIKey is the server's own secret key that clients must send in
 	// the X-API-Key header (or Authorization: Bearer <key>).
-	// If empty, authentication is disabled (useful for local-only setups).
+	// The server refuses to start without any key unless AllowNoAuth is set.
 	APIKey string
+
+	// APIKeys are additional accepted keys (API_KEYS, comma-separated) — one per device,
+	// so a single device can be revoked without touching the others.
+	APIKeys []string
+
+	// AllowNoAuth (ALLOW_NO_AUTH=true) lets the server start with no API key at all.
+	// Only for a server that is reachable from this machine alone.
+	AllowNoAuth bool
+
+	// AuthFailLimit is how many failed auth attempts one IP may make per minute before
+	// it is locked out with 429 for the rest of the window.
+	AuthFailLimit int
+
+	// ConfigWritable allows POST /config to replace DeepL/OpenAI keys at runtime.
+	ConfigWritable bool
+
+	// MaxBufferNotes caps the buffer so a leaked key can't fill the disk. 0 = unlimited.
+	MaxBufferNotes int
 
 	// RateLimitDefault is the max requests per minute per IP for general endpoints.
 	RateLimitDefault int
@@ -66,6 +89,7 @@ type Config struct {
 func Load() *Config {
 	return &Config{
 		Port:               getEnv("PORT", "5005"),
+		Host:               getEnv("HOST", ""),
 		AnkiURL:            getEnv("ANKI_URL", "http://host.docker.internal:8765"),
 		DeepLKey:           getEnv("DEEPL_KEY", ""),
 		BufferFile:         getEnv("BUFFER_FILE", "/data/anki_buffer.json"),
@@ -78,6 +102,11 @@ func Load() *Config {
 
 		// Security
 		APIKey:           getEnv("API_KEY", ""),
+		APIKeys:          getEnvList("API_KEYS"),
+		AllowNoAuth:      getEnvBool("ALLOW_NO_AUTH", false),
+		AuthFailLimit:    getEnvInt("AUTH_FAIL_LIMIT", 10),
+		ConfigWritable:   getEnvBool("CONFIG_WRITABLE", false),
+		MaxBufferNotes:   getEnvInt("MAX_BUFFER_NOTES", 5000),
 		RateLimitDefault: getEnvInt("RATE_LIMIT_DEFAULT", 60),
 		RateLimitGrammar: getEnvInt("RATE_LIMIT_GRAMMAR", 10),
 		MaxBodyBytes:     int64(getEnvInt("MAX_BODY_BYTES", 65536)), // 64 KB
@@ -91,6 +120,25 @@ func getEnv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// AllAPIKeys returns every accepted key; empty means authentication is off.
+func (c *Config) AllAPIKeys() []string {
+	var keys []string
+	if c.APIKey != "" {
+		keys = append(keys, c.APIKey)
+	}
+	return append(keys, c.APIKeys...)
+}
+
+func getEnvList(key string) []string {
+	var out []string
+	for _, part := range strings.Split(os.Getenv(key), ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func getEnvInt(key string, fallback int) int {

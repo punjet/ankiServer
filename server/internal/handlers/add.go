@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -72,8 +73,20 @@ func Add(buf *buffer.Buffer, getAI func() *aiClient.Client, logger *slog.Logger)
 		// Unique buffer ID for future enrichment hooks.
 		bufID := fmt.Sprintf("%s_%d", word, time.Now().UnixMilli())
 		data["_buf_id"] = bufID
+		data["_created"] = time.Now().Unix()
+
+		// Clients hold the card back until its audio is attached, so a sync right after
+		// /add doesn't file it without sound (the audio would then have nowhere to go).
+		ttsClient := getAI()
+		if ttsClient != nil {
+			data["_tts_pending"] = true
+		}
 
 		if err := buf.Append(data); err != nil {
+			if errors.Is(err, buffer.ErrFull) {
+				writeJSON(w, http.StatusInsufficientStorage, map[string]string{"error": "buffer_full", "detail": "buffer is full — sync with Anki first"})
+				return
+			}
 			logger.Error("buffer append failed", "err", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"status": "error"})
 			return
@@ -82,7 +95,7 @@ func Add(buf *buffer.Buffer, getAI func() *aiClient.Client, logger *slog.Logger)
 		logger.Info("📥 Added to buffer", "word", word, "domain", domainTag, "url", truncate(sourceURL, 60))
 
 		// Launch background TTS fetch
-		if ai := getAI(); ai != nil {
+		if ai := ttsClient; ai != nil {
 			contextStr := nestedStr(data, "params", "note", "fields", "Context")
 			go func(word, ctx, id string) {
 				ttsText := word
@@ -93,10 +106,12 @@ func Add(buf *buffer.Buffer, getAI func() *aiClient.Client, logger *slog.Logger)
 				base64Audio, err := ai.TextToSpeech(ttsText, "alloy")
 				if err != nil {
 					logger.Error("TTS failed", "word", word, "err", err)
+					_ = buf.UpdateNote(id, func(n buffer.Note) { delete(n, "_tts_pending") })
 					return
 				}
 				err = buf.UpdateNote(id, func(n buffer.Note) {
 					n["_audio_base64"] = base64Audio
+					delete(n, "_tts_pending")
 				})
 				if err != nil {
 					logger.Error("Failed to update note with audio", "word", word, "err", err)

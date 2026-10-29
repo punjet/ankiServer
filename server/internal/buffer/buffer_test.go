@@ -1,6 +1,7 @@
 package buffer
 
 import (
+	"errors"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -9,17 +10,17 @@ import (
 func TestBuffer_AppendReadAll(t *testing.T) {
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, "buffer.json")
-	
+
 	b, err := New(filePath)
 	if err != nil {
 		t.Fatalf("failed to create buffer: %v", err)
 	}
-	
+
 	note1 := Note{"_buf_id": "1", "fields": map[string]any{"Front": "hello"}}
 	if err := b.Append(note1); err != nil {
 		t.Fatalf("Append failed: %v", err)
 	}
-	
+
 	notes, err := b.ReadAll()
 	if err != nil {
 		t.Fatalf("ReadAll failed: %v", err)
@@ -35,12 +36,12 @@ func TestBuffer_AppendReadAll(t *testing.T) {
 func TestBuffer_Replace(t *testing.T) {
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, "buffer.json")
-	
+
 	b, err := New(filePath)
 	if err != nil {
 		t.Fatalf("failed to create buffer: %v", err)
 	}
-	
+
 	notes := []Note{
 		{"_buf_id": "1"},
 		{"_buf_id": "2"},
@@ -48,7 +49,7 @@ func TestBuffer_Replace(t *testing.T) {
 	if err := b.Replace(notes); err != nil {
 		t.Fatalf("Replace failed: %v", err)
 	}
-	
+
 	read, err := b.ReadAll()
 	if err != nil {
 		t.Fatalf("ReadAll failed: %v", err)
@@ -61,27 +62,27 @@ func TestBuffer_Replace(t *testing.T) {
 func TestBuffer_UpdateNote(t *testing.T) {
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, "buffer.json")
-	
+
 	b, err := New(filePath)
 	if err != nil {
 		t.Fatalf("failed to create buffer: %v", err)
 	}
-	
+
 	_ = b.Append(Note{"_buf_id": "1", "data": "old"})
 	_ = b.Append(Note{"_buf_id": "2", "data": "ignore"})
-	
+
 	err = b.UpdateNote("1", func(n Note) {
 		n["data"] = "new"
 	})
 	if err != nil {
 		t.Fatalf("UpdateNote failed: %v", err)
 	}
-	
+
 	notes, _ := b.ReadAll()
 	if len(notes) != 2 {
 		t.Fatalf("expected 2 notes, got %d", len(notes))
 	}
-	
+
 	if notes[0]["data"] != "new" {
 		t.Errorf("expected 'new', got %v", notes[0]["data"])
 	}
@@ -90,12 +91,12 @@ func TestBuffer_UpdateNote(t *testing.T) {
 func TestBuffer_Concurrent(t *testing.T) {
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, "buffer.json")
-	
+
 	b, err := New(filePath)
 	if err != nil {
 		t.Fatalf("failed to create buffer: %v", err)
 	}
-	
+
 	var wg sync.WaitGroup
 	for i := 0; i < 100; i++ {
 		wg.Add(1)
@@ -106,9 +107,31 @@ func TestBuffer_Concurrent(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
-	
+
 	notes, _ := b.ReadAll()
 	if len(notes) != 100 {
 		t.Errorf("expected 100 notes, got %d", len(notes))
+	}
+}
+
+func TestBuffer_MaxNotes(t *testing.T) {
+	b, err := New(filepath.Join(t.TempDir(), "buf.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.MaxNotes = 2
+	for i := 0; i < 2; i++ {
+		if err := b.Append(Note{"i": i}); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+	}
+	if err := b.Append(Note{"i": 3}); !errors.Is(err, ErrFull) {
+		t.Fatalf("expected ErrFull, got %v", err)
+	}
+	if err := b.Replace(nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Append(Note{"i": 4}); err != nil {
+		t.Fatalf("after drain: %v", err)
 	}
 }

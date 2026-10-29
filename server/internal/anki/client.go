@@ -170,13 +170,15 @@ func (c *Client) EnsureModelFields(modelName string, required []string) error {
 		existingSet[f] = true
 	}
 
+	index := len(existing)
 	for _, f := range required {
 		if !existingSet[f] {
-			c.Do("addNoteField", map[string]any{
+			c.Do("modelFieldAdd", map[string]any{
 				"modelName": modelName,
 				"fieldName": f,
-				"index":     nil,
+				"index":     index,
 			})
+			index++
 		}
 	}
 	return nil

@@ -2,6 +2,7 @@ package buffer
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,10 +12,16 @@ import (
 // Note represents a raw AnkiConnect note payload stored in the buffer.
 type Note map[string]any
 
+// ErrFull is returned by Append when the buffer holds MaxNotes notes.
+var ErrFull = errors.New("buffer: full")
+
 // Buffer is a thread-safe, file-backed queue of Anki notes.
 type Buffer struct {
 	mu       sync.RWMutex
 	filePath string
+
+	// MaxNotes caps the number of buffered notes; 0 means unlimited.
+	MaxNotes int
 }
 
 // New creates a new Buffer backed by the given file path.
@@ -34,6 +41,9 @@ func (b *Buffer) Append(note Note) error {
 	notes, err := b.load()
 	if err != nil {
 		return err
+	}
+	if b.MaxNotes > 0 && len(notes) >= b.MaxNotes {
+		return ErrFull
 	}
 	notes = append(notes, note)
 	return b.save(notes)
